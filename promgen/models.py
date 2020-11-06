@@ -514,9 +514,12 @@ class Alert(models.Model):
 
     def expand(self):
         # Map of Prometheus labels to Promgen objects
+        # The elements in the first tuple all represent the same object,
+        # but the first one that's found in the common labels will be used
+        # to filter routable objects.
         LABEL_MAPPING = [
-            ('project', Project),
-            ('service', Service),
+            (('promgen_project', 'project'), Project),
+            (('promgen_service', 'service'), Service),
         ]
         routable = {}
         data = json.loads(self.body)
@@ -526,17 +529,25 @@ class Alert(models.Model):
 
         # Look through our labels and find the object from Promgen's DB
         # If we find an object in Promgen, add an annotation with a direct link
-        for label, klass in LABEL_MAPPING:
-            if label not in data['commonLabels']:
-                logger.debug('Missing label %s', label)
+        for label_aliases, klass in LABEL_MAPPING:
+
+            label = None
+            for alias in label_aliases:
+                if alias in data['commonLabels']:
+                    label = alias
+                    break
+            else:
+                logger.debug('Missing label(s) %s', ', '.join(label_aliases))
                 continue
+
+            canonical_label = label_aliases[-1]
 
             # Should only find a single value, but I think filter is a little
             # bit more forgiving than get in terms of throwing errors
             for obj in klass.objects.filter(name=data['commonLabels'][label]):
                 logger.debug('Found %s %s', label, obj)
-                routable[label] = obj
-                data['commonAnnotations'][label] = resolve_domain(obj)
+                routable[cannonical_label] = obj
+                data['commonAnnotations'][cannonical_label] = resolve_domain(obj)
 
         return routable, data
 
